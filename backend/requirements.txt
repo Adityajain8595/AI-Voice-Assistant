@@ -4,6 +4,7 @@ langchain_community
 langchain_core
 fastapi
 uvicorn
+python-multipart
 google-cloud-aiplatform 
 google-cloud-texttospeech
 langchain-google-vertexai
