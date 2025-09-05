@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
-const DEFAULT_BACKEND = "http://127.0.0.1:8000";
+const DEFAULT_BACKEND = "https://ai-voice-assistant-s07k.onrender.com";
 const markdownStripRegex = /(\*+|#+)/g;
 
 const MicSVG = () => (
