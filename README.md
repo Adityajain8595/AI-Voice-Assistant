@@ -18,6 +18,7 @@ The assistant leverages **LangChain for intelligent conversations, Google Cloud 
 
 🌐 **Live Demo**:
 
+https://github.com/user-attachments/assets/f937215c-51dc-4434-9d64-ba134fde48d6
 
 ---
 
