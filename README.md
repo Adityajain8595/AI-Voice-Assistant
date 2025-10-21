@@ -1,4 +1,4 @@
-"<h1 align="center">AI VOICE ASSISTANT</h1>
+<h1 align="center">AI VOICE ASSISTANT</h1>
 <p align="center"><em>Your intelligent voice-powered AI companion for natural conversations</em></p>
 
 <p align="center">
@@ -97,7 +97,7 @@ Ensure your system has:
 
 1. Clone the repository:
 ```sh
-❯ git clone <repository-url>
+❯ git clone "https://github.com/Adityajain8595/AI-Voice-Assistant"
 ❯ cd AI-Voice-Assistant
 ```
 
