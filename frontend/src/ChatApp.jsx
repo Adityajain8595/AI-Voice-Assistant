@@ -45,25 +45,16 @@ function useOutputAnalyser() {
   const dataArrayRef = useRef(null);
 
   const playBlob = async (blob) => {
-    // Check if blob is valid
     if (!blob || blob.size === 0) {
-      console.error("Received empty audio blob");
       return;
     }
-    
-    console.log("Audio blob details:", {
-      size: blob.size,
-      type: blob.type,
-    });
 
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
       const arrayBuf = await blob.arrayBuffer();
       
-      // Use the promise-based decodeAudioData
       const audioBuf = await ctx.decodeAudioData(arrayBuf);
       
-      // Resume audio context if needed (required for autoplay policies)
       if (ctx.state === 'suspended') {
         await ctx.resume();
       }
@@ -90,13 +81,12 @@ function useOutputAnalyser() {
           setBars(Array(48).fill(0));
         }, 50);
         
-        // Cleanup
         try { 
           analyser.disconnect(); 
           source.disconnect(); 
           ctx.close(); 
         } catch (e) {
-          console.warn("Cleanup error:", e);
+          // Silent cleanup
         }
         
         audioCtxRef.current = null;
@@ -106,7 +96,6 @@ function useOutputAnalyser() {
       };
       
     } catch (error) {
-      console.error("Error playing audio:", error);
       setIsPlaying(false);
     }
   };
@@ -157,39 +146,8 @@ function beep(open = true) {
     osc.stop(now + 0.18);
     osc.onended = () => ctx.close();
   } catch (e) {
-    console.warn("Beep failed:", e);
+    // Silent beep failure
   }
-}
-
-function speakWithBrowserTTS(text, voice = "female", lang = "en-US") {
-  if (!('speechSynthesis' in window)) {
-    console.error("Browser TTS not supported");
-    return false;
-  }
-  
-  // Cancel any ongoing speech
-  window.speechSynthesis.cancel();
-  
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = lang;
-  utterance.rate = 1.0;
-  utterance.pitch = voice === "male" ? 0.8 : 1.1;
-  utterance.volume = 1.0;
-  
-  // Try to set voice based on gender preference
-  const voices = speechSynthesis.getVoices();
-  const preferredVoices = voices.filter(v => 
-    v.lang.startsWith(lang) &&
-    (voice === "male" ? v.name.toLowerCase().includes("male") || v.name.toLowerCase().includes("man") : 
-                        v.name.toLowerCase().includes("female") || v.name.toLowerCase().includes("woman"))
-  );
-  
-  if (preferredVoices.length > 0) {
-    utterance.voice = preferredVoices[0];
-  }
-  
-  window.speechSynthesis.speak(utterance);
-  return true;
 }
 
 export default function VoiceAssistant({ backendUrl = DEFAULT_BACKEND, sessionId = "default_session" }) {
@@ -201,79 +159,17 @@ export default function VoiceAssistant({ backendUrl = DEFAULT_BACKEND, sessionId
   const [showTextBox, setShowTextBox] = useState(false);
   const [history, setHistory] = useState([]);
   const [voice, setVoice] = useState("female");
-  const [useBrowserTTS, setUseBrowserTTS] = useState(false);
-  const [backendStatus, setBackendStatus] = useState("Checking...");
   const recognitionRef = useRef(null);
 
   const { isPlaying, bars, playBlob } = useOutputAnalyser();
   const [volume, setVolume] = useState(0);
   const language = "en";
 
-  // Helper function to build URLs without double slashes
   const buildUrl = (endpoint) => {
-    // Remove trailing slash from backendUrl if it exists
     const base = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
-    // Remove leading slash from endpoint if it exists
     const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
     return `${base}${path}`;
   };
-
-  // Test backend connection on mount
-  useEffect(() => {
-    const testBackend = async () => {
-      try {
-        // Test if backend is reachable
-        const testUrl = buildUrl("");
-        console.log("Testing backend at:", testUrl);
-        
-        const testRes = await fetch(testUrl, {
-          method: 'GET',
-        });
-        
-        if (testRes.ok) {
-          setBackendStatus("Connected");
-          
-          // Test TTS endpoint specifically
-          const ttsUrl = buildUrl("tts");
-          console.log("Testing TTS at:", ttsUrl);
-          
-          const ttsBody = new URLSearchParams();
-          ttsBody.set("text", "Test");
-          ttsBody.set("lang", language);
-          ttsBody.set("voice", voice);
-          
-          const ttsRes = await fetch(ttsUrl, {
-            method: 'POST',
-            headers: { 
-              'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: ttsBody
-          });
-          
-          console.log("TTS test response status:", ttsRes.status);
-          
-          if (ttsRes.ok) {
-            const blob = await ttsRes.blob();
-            console.log("TTS test successful, blob:", blob);
-            setBackendStatus("TTS working");
-          } else {
-            console.warn(`TTS test failed: ${ttsRes.status}`);
-            setBackendStatus("TTS endpoint error");
-            setUseBrowserTTS(true);
-          }
-        } else {
-          setBackendStatus("Backend unreachable");
-          setUseBrowserTTS(true);
-        }
-      } catch (error) {
-        console.error("Backend test failed:", error);
-        setBackendStatus("Connection failed");
-        setUseBrowserTTS(true);
-      }
-    };
-    
-    testBackend();
-  }, [backendUrl, language, voice]);
 
   const startRecognition = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -340,7 +236,6 @@ export default function VoiceAssistant({ backendUrl = DEFAULT_BACKEND, sessionId
     setStatus("Thinking…");
     try {
       const askUrl = buildUrl("ask");
-      console.log("Sending to ask endpoint:", askUrl);
       
       const body = new URLSearchParams();
       body.set("query", query);
@@ -355,7 +250,7 @@ export default function VoiceAssistant({ backendUrl = DEFAULT_BACKEND, sessionId
       });
       
       if (!res.ok) {
-        throw new Error(`Ask request failed: ${res.status} ${res.statusText}`);
+        throw new Error(`Ask request failed: ${res.status}`);
       }
       
       const json = await res.json();
@@ -365,72 +260,35 @@ export default function VoiceAssistant({ backendUrl = DEFAULT_BACKEND, sessionId
       setAssistantText(cleanedAnswer);
       setHistory(json.chat_history || []);
       
-      // Try backend TTS if enabled
-      if (!useBrowserTTS && cleanedAnswer.trim()) {
-        try {
-          const ttsUrl = buildUrl("tts");
-          console.log("Requesting TTS from:", ttsUrl);
-          
-          const ttsBody = new URLSearchParams();
-          ttsBody.set("text", cleanedAnswer);
-          ttsBody.set("lang", language);
-          ttsBody.set("voice", voice);
-          
-          const ttsRes = await fetch(ttsUrl, { 
-            method: 'POST', 
-            headers: { 
-              'Content-Type': 'application/x-www-form-urlencoded',
-            }, 
-            body: ttsBody 
-          });
-          
-          console.log("TTS response status:", ttsRes.status);
-          
-          if (ttsRes.ok) {
-            const ttsBlob = await ttsRes.blob();
-            
-            console.log("Received audio blob:", {
-              size: ttsBlob.size,
-              type: ttsBlob.type
-            });
-            
-            if (ttsBlob && ttsBlob.size > 0) {
-              await playBlob(ttsBlob);
-              setStatus("Speaking…");
-              return;
-            } else {
-              console.warn("Empty audio blob received");
-            }
-          } else {
-            console.error(`Backend TTS returned ${ttsRes.status}`);
-            setBackendStatus(`TTS failed: ${ttsRes.status}`);
-          }
-        } catch (ttsError) {
-          console.error("Backend TTS request error:", ttsError);
-          setBackendStatus("TTS request error");
+      // Get TTS audio
+      const ttsUrl = buildUrl("tts");
+      const ttsBody = new URLSearchParams();
+      ttsBody.set("text", cleanedAnswer);
+      ttsBody.set("lang", language);
+      ttsBody.set("voice", voice);
+      
+      const ttsRes = await fetch(ttsUrl, { 
+        method: 'POST', 
+        headers: { 
+          'Content-Type': 'application/x-www-form-urlencoded',
+        }, 
+        body: ttsBody 
+      });
+      
+      if (ttsRes.ok) {
+        const ttsBlob = await ttsRes.blob();
+        if (ttsBlob && ttsBlob.size > 0) {
+          await playBlob(ttsBlob);
+          setStatus("Speaking…");
+          return;
         }
       }
       
-      // Fall back to browser TTS if backend TTS failed or is disabled
-      if (cleanedAnswer.trim() && speakWithBrowserTTS(cleanedAnswer, voice, "en-US")) {
-        setStatus("Speaking… (Browser TTS)");
-        setTimeout(() => {
-          setStatus("Tap to talk");
-        }, 3000);
-      } else {
-        setStatus("Tap to talk");
-      }
+      setStatus("Tap to talk");
       
     } catch (e) {
-      console.error("Error in sendToTalk:", e);
-      setAssistantText(`Error: ${e.message}. Using browser TTS as fallback.`);
-      
-      // Try browser TTS as last resort
-      if (userText.trim() && speakWithBrowserTTS(userText, voice, "en-US")) {
-        setStatus("Speaking… (Fallback)");
-      } else {
-        setStatus("Tap to talk");
-      }
+      setAssistantText(`Error: ${e.message}`);
+      setStatus("Tap to talk");
     } finally {
       setUserText("");
     }
@@ -449,55 +307,6 @@ export default function VoiceAssistant({ backendUrl = DEFAULT_BACKEND, sessionId
     sendToTalk(userText);
   };
 
-  const toggleTTSMethod = () => {
-    const newUseBrowserTTS = !useBrowserTTS;
-    setUseBrowserTTS(newUseBrowserTTS);
-    setBackendStatus(newUseBrowserTTS ? "Using browser TTS" : "Using backend TTS");
-  };
-
-  const testBackendConnection = async () => {
-    setBackendStatus("Testing...");
-    try {
-      const ttsUrl = buildUrl("tts");
-      console.log("Testing TTS endpoint:", ttsUrl);
-      
-      const ttsBody = new URLSearchParams();
-      ttsBody.set("text", "Test message from frontend");
-      ttsBody.set("lang", language);
-      ttsBody.set("voice", voice);
-      
-      const response = await fetch(ttsUrl, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: ttsBody
-      });
-      
-      console.log("TTS test response status:", response.status);
-      
-      if (response.ok) {
-        const blob = await response.blob();
-        console.log("TTS test successful, blob:", blob);
-        setBackendStatus("Backend TTS working");
-        setUseBrowserTTS(false);
-        // Test play the audio
-        if (blob) {
-          await playBlob(blob);
-        }
-      } else {
-        const errorText = await response.text();
-        console.error("TTS test failed:", errorText);
-        setBackendStatus(`TTS failed: ${response.status}`);
-        setUseBrowserTTS(true);
-      }
-    } catch (error) {
-      console.error("TTS test error:", error);
-      setBackendStatus(`Error: ${error.message}`);
-      setUseBrowserTTS(true);
-    }
-  };
-
   const ringScale = useMemo(() => 1 + volume * 0.25, [volume]);
   const ringOpacity = useMemo(() => 0.35 + volume * 0.4, [volume]);
 
@@ -512,19 +321,6 @@ export default function VoiceAssistant({ backendUrl = DEFAULT_BACKEND, sessionId
           </div>
 
           <div className="relative rounded-2xl bg-white/5 backdrop-blur-xl ring-1 ring-white/10 p-6 shadow-2xl overflow-hidden">
-            
-            <div className="mb-2">
-              <div className="text-xs text-slate-400 mb-1 flex items-center justify-between">
-                <span>Backend: {backendUrl}</span>
-                <span className={`px-2 py-0.5 rounded ${
-                  backendStatus.includes("working") || backendStatus.includes("Connected")
-                    ? 'bg-emerald-500/20 text-emerald-300' 
-                    : 'bg-amber-500/20 text-amber-300'
-                }`}>
-                  {backendStatus}
-                </span>
-              </div>
-            </div>
             
             <div className="mb-8">
               <div className="text-center mt-3 text-sm md:text-base text-slate-300 min-h-[1.5rem]">
@@ -541,15 +337,19 @@ export default function VoiceAssistant({ backendUrl = DEFAULT_BACKEND, sessionId
                   </motion.div>
                 </AnimatePresence>
               </div>
-              <div className="h-24 md:h-28 w-full flex items-center justify-center gap-[6px] mt-4">
-                {bars.map((h, i) => (
-                  <div
-                    key={i}
-                    className="w-[6px] rounded-full bg-gradient-to-t from-emerald-400/40 via-emerald-300/70 to-emerald-100"
-                    style={{ height: `${h}px` }} 
-                    aria-hidden
-                  />
-                ))}
+              
+              {/* Centered Waveform Visualization */}
+              <div className="flex items-center justify-center mt-6">
+                <div className="h-24 md:h-28 flex items-center justify-center gap-[6px]">
+                  {bars.map((h, i) => (
+                    <div
+                      key={i}
+                      className="w-[6px] rounded-full bg-gradient-to-t from-emerald-400/40 via-emerald-300/70 to-emerald-100 transition-all duration-75"
+                      style={{ height: `${h}px` }} 
+                      aria-hidden
+                    />
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -599,34 +399,12 @@ export default function VoiceAssistant({ backendUrl = DEFAULT_BACKEND, sessionId
                 {micDenied && <span className="text-rose-300"> — allow mic permissions</span>}
               </div>
 
-              <div className="flex flex-wrap gap-2 justify-center">
-                <button
-                  onClick={() => setShowTextBox((s) => !s)}
-                  className="px-3 py-1.5 text-xs rounded-full border border-white/15 bg-white/5 hover:bg-white/10 transition" 
-                >
-                  {showTextBox ? "Hide text input" : "Use text instead"}
-                </button>
-                
-                <button
-                  onClick={toggleTTSMethod}
-                  className={`px-3 py-1.5 text-xs rounded-full border transition ${
-                    useBrowserTTS 
-                      ? 'border-emerald-400/60 bg-emerald-500/20 text-emerald-200' 
-                      : 'border-white/15 bg-white/5 hover:bg-white/10'
-                  }`}
-                  title={useBrowserTTS ? "Using Browser TTS" : "Using Backend TTS"}
-                >
-                  TTS: {useBrowserTTS ? "Browser" : "Backend"}
-                </button>
-                
-                <button
-                  onClick={testBackendConnection}
-                  className="px-3 py-1.5 text-xs rounded-full border border-blue-400/30 bg-blue-500/10 hover:bg-blue-500/20 text-blue-200 transition"
-                  title="Test backend connection"
-                >
-                  Test TTS
-                </button>
-              </div>
+              <button
+                onClick={() => setShowTextBox((s) => !s)}
+                className="px-3 py-1.5 text-xs rounded-full border border-white/15 bg-white/5 hover:bg-white/10 transition" 
+              >
+                {showTextBox ? "Hide text input" : "Use text instead"}
+              </button>
 
               <AnimatePresence initial={false}>
                 {showTextBox && (
