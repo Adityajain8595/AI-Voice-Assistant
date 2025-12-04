@@ -45,34 +45,76 @@ function useOutputAnalyser() {
   const dataArrayRef = useRef(null);
 
   const playBlob = async (blob) => {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const arrayBuf = await blob.arrayBuffer();
-    const audioBuf = await ctx.decodeAudioData(arrayBuf);
-    const source = ctx.createBufferSource();
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 256;
-    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    // Check if blob is valid
+    if (!blob || blob.size === 0) {
+      console.error("Received empty audio blob");
+      return;
+    }
+    
+    console.log("Audio blob details:", {
+      size: blob.size,
+      type: blob.type,
+    });
 
-    source.buffer = audioBuf;
-    source.connect(analyser);
-    analyser.connect(ctx.destination);
-    source.start();
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const arrayBuf = await blob.arrayBuffer();
+      
+      // Use the promise-based decodeAudioData
+      const audioBuf = await ctx.decodeAudioData(arrayBuf);
+      
+      // Resume audio context if needed (required for autoplay policies)
+      if (ctx.state === 'suspended') {
+        await ctx.resume();
+      }
+      
+      const source = ctx.createBufferSource();
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
-    audioCtxRef.current = ctx;
-    sourceRef.current = source;
-    analyserRef.current = analyser;
-    dataArrayRef.current = dataArray;
-    setIsPlaying(true);
+      source.buffer = audioBuf;
+      source.connect(analyser);
+      analyser.connect(ctx.destination);
+      source.start();
 
-    source.onended = () => {
-      setTimeout(() => {
-        setIsPlaying(false);
-        setBars(Array(48).fill(0));
-      }, 50);
-      try { analyser.disconnect(); } catch {}
-      try { source.disconnect(); } catch {}
-      try { ctx.close(); } catch {}
-    };
+      audioCtxRef.current = ctx;
+      sourceRef.current = source;
+      analyserRef.current = analyser;
+      dataArrayRef.current = dataArray;
+      setIsPlaying(true);
+
+      source.onended = () => {
+        setTimeout(() => {
+          setIsPlaying(false);
+          setBars(Array(48).fill(0));
+        }, 50);
+        
+        // Cleanup
+        try { 
+          analyser.disconnect(); 
+          source.disconnect(); 
+          ctx.close(); 
+        } catch (e) {
+          console.warn("Cleanup error:", e);
+        }
+        
+        audioCtxRef.current = null;
+        sourceRef.current = null;
+        analyserRef.current = null;
+        dataArrayRef.current = null;
+      };
+      
+    } catch (error) {
+      console.error("Error playing audio:", error);
+      setIsPlaying(false);
+      
+      // Try to play a fallback beep to confirm audio works
+      beep(true);
+      
+      // Show error in UI
+      setAssistantText(prev => prev + " [Audio playback failed]");
+    }
   };
 
   useEffect(() => {
@@ -203,30 +245,57 @@ export default function VoiceAssistant({ backendUrl = DEFAULT_BACKEND, sessionId
       const body = new URLSearchParams();
       body.set("query", query);
       body.set("session_id", sessionId);
+      
       const res = await fetch(`${backendUrl}/ask`, { 
         method: 'POST', 
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, 
         body 
       });
+      
       const json = await res.json();
       const rawAnswer = json.answer || "";
       const cleanedAnswer = rawAnswer.replace(markdownStripRegex, '');
 
       setAssistantText(cleanedAnswer);
       setHistory(json.chat_history || []);
+      
       const ttsBody = new URLSearchParams();
       ttsBody.set("text", cleanedAnswer);
       ttsBody.set("lang", language);
       ttsBody.set("voice", voice);
+      
       const ttsRes = await fetch(`${backendUrl}/tts`, { 
         method: 'POST', 
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, 
         body: ttsBody 
       });
+      
+      // Check if response is OK
+      if (!ttsRes.ok) {
+        throw new Error(`TTS request failed: ${ttsRes.status} ${ttsRes.statusText}`);
+      }
+      
+      // Check content type
+      const contentType = ttsRes.headers.get('content-type');
+      console.log("Audio content type:", contentType);
+      
       const ttsBlob = await ttsRes.blob();
+      
+      // Validate blob
+      if (!ttsBlob || ttsBlob.size === 0) {
+        throw new Error("Received empty audio response");
+      }
+      
+      // Check blob type
+      if (!ttsBlob.type.includes('audio') && !ttsBlob.type.includes('octet-stream')) {
+        console.warn("Unexpected content type:", ttsBlob.type);
+      }
+      
       await playBlob(ttsBlob);
+      
     } catch (e) {
-      setAssistantText(e.message);
+      console.error("Error in sendToTalk:", e);
+      setAssistantText(`Error: ${e.message}`);
       setStatus("Tap to talk");
     } finally {
       setUserText("");
@@ -253,7 +322,6 @@ export default function VoiceAssistant({ backendUrl = DEFAULT_BACKEND, sessionId
     <div className="h-screen w-screen bg-gradient-to-br from-slate-950 via-slate-900 to-zinc-900 text-slate-100 flex items-center justify-center p-2 md:p-4 overflow-hidden">
       <div className="flex flex-col md:flex-row gap-6 w-full h-full max-w-[1600px] mx-auto">
         
-        
         <div className="flex-1 overflow-y-auto p-4">
           <div className="flex items-center justify-between mb-4">
             <h1 className="text-2xl md:text-3xl font-semibold tracking-tight">AI Voice Assistant</h1>
@@ -261,7 +329,6 @@ export default function VoiceAssistant({ backendUrl = DEFAULT_BACKEND, sessionId
           </div>
 
           <div className="relative rounded-2xl bg-white/5 backdrop-blur-xl ring-1 ring-white/10 p-6 shadow-2xl overflow-hidden">
-            
             
             <div className="mb-8">
               <div className="text-center mt-3 text-sm md:text-base text-slate-300 min-h-[1.5rem]">
